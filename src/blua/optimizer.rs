@@ -52,7 +52,7 @@ pub fn fold_instruction_list(norm: &[Bop]) -> Vec<Bop> {
 				norm,
 				index,
 				|v| {
-					if let &Bop::DataPointer(i) = v {
+					if let Bop::DataPointer(i) = *v {
 						Some(i)
 					} else {
 						None
@@ -65,7 +65,7 @@ pub fn fold_instruction_list(norm: &[Bop]) -> Vec<Bop> {
 				norm,
 				index,
 				|v| {
-					if let &Bop::DataValue(i) = v {
+					if let Bop::DataValue(i) = *v {
 						Some(i)
 					} else {
 						None
@@ -78,7 +78,7 @@ pub fn fold_instruction_list(norm: &[Bop]) -> Vec<Bop> {
 				norm,
 				index,
 				|v| {
-					if let &Bop::Output(i) = v {
+					if let Bop::Output(i) = *v {
 						Some(i)
 					} else {
 						None
@@ -91,7 +91,7 @@ pub fn fold_instruction_list(norm: &[Bop]) -> Vec<Bop> {
 				norm,
 				index,
 				|v| {
-					if let &Bop::Input(i) = v {
+					if let Bop::Input(i) = *v {
 						Some(i)
 					} else {
 						None
