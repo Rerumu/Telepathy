@@ -1,4 +1,4 @@
-use crate::blua::shared::Bop;
+use crate::syntax::shared::Bop;
 
 #[derive(Default)]
 struct State {

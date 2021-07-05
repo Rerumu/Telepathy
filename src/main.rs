@@ -1,4 +1,4 @@
-use blua::{
+use syntax::{
 	optimizer::fold_instruction_list,
 	parser::{bf_code_to_ast, Error},
 	shared::Bop,
@@ -6,7 +6,7 @@ use blua::{
 use std::{fs, io};
 use target::{lua, python};
 
-mod blua;
+mod syntax;
 mod target;
 
 #[derive(Copy, Clone)]
