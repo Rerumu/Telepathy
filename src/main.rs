@@ -65,7 +65,7 @@ fn main() {
 			name => {
 				let bf = translate_to_bf(name, is_opt, lang);
 
-				println!("{}", bf);
+				print!("{}", bf);
 			}
 		}
 	}

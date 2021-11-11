@@ -17,7 +17,7 @@ impl State {
 
 	fn write_arith(&mut self, i: i32, var: &str) {
 		let sign = if i < 0 { '-' } else { '+' };
-		let value = format!("{} = {} {} {}", var, var, sign, i.abs());
+		let value = format!("{0} = {0} {1} {2}", var, sign, i.abs());
 
 		self.write_line(value.as_str());
 	}
@@ -78,5 +78,6 @@ pub fn from_ast(code: &[Bop]) -> String {
 	state.write_line("local input = function(x) return io.read(1):byte(1, 1) end");
 	state.buffer.push('\n');
 	state.write_block(code);
+	state.buffer.pop();
 	state.buffer
 }
