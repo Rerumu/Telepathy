@@ -23,12 +23,12 @@ impl State {
 	}
 
 	fn write_loop(&mut self, code: &[Bop]) {
-		self.write_line("while (memory[pointer] != 0) {{");
+		self.write_line("while (memory[pointer] != 0) {");
 		self.indent += 1;
 		self.write_block(code);
 		self.buffer.pop();
 		self.indent -= 1;
-		self.write_line("}}");
+		self.write_line("}");
 	}
 
 	fn write_output(&mut self, num: u32) {
