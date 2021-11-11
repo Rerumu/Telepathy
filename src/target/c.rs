@@ -17,7 +17,7 @@ impl State {
 
 	fn write_arith(&mut self, i: i32, var: &str) {
 		let sign = if i < 0 { '-' } else { '+' };
-		let value = format!("{0} = {0} {1} {2};", var, sign, i.abs());
+		let value = format!("{} {}= {};", var, sign, i.abs());
 
 		self.write_line(value.as_str());
 	}
