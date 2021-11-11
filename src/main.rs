@@ -9,6 +9,7 @@ mod target;
 
 #[derive(Copy, Clone)]
 enum Language {
+	BrainFuck,
 	Lua,
 	Python,
 }
@@ -34,6 +35,7 @@ fn translate_to_bf(name: &str, is_opt: bool, lang: Language) -> String {
 	}
 
 	match lang {
+		Language::BrainFuck => target::brainfuck::from_ast(ast.as_ref()),
 		Language::Lua => target::lua::from_ast(ast.as_ref()),
 		Language::Python => target::python::from_ast(ast.as_ref()),
 	}
@@ -45,6 +47,9 @@ fn main() {
 
 	for arg in std::env::args().skip(1) {
 		match arg.as_str() {
+			"--brainfuck" => {
+				lang = Language::BrainFuck;
+			}
 			"--lua" => {
 				lang = Language::Lua;
 			}
