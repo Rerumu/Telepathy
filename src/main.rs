@@ -30,7 +30,7 @@ fn translate_to_bf(name: &str, is_opt: bool, lang: Language) -> String {
 	let mut ast = make_ast(source.as_str()).expect("Failure to translate");
 
 	if is_opt {
-		ast = fold_bf_code(ast.as_ref());
+		fold_bf_code(ast.as_mut());
 	}
 
 	match lang {
