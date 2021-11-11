@@ -9,6 +9,10 @@ fn fold_loop_list(norm: &mut Vec<Bop>) {
 }
 
 fn fold_action_list(norm: &mut Vec<Bop>) {
+	if norm.is_empty() {
+		return;
+	}
+
 	let mut to_remove = Vec::new();
 
 	for i in 0..norm.len() - 1 {
