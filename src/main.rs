@@ -1,10 +1,8 @@
 use syntax::{
-	optimizer::fold_instruction_list,
+	optimizer::fold_bf_code,
 	parser::{bf_code_to_ast, Error},
 	shared::Bop,
 };
-use std::{fs, io};
-use target::{lua, python};
 
 mod syntax;
 mod target;
@@ -15,40 +13,33 @@ enum Language {
 	Python,
 }
 
-fn make_ast(source: &str) -> io::Result<Vec<Bop>> {
+fn make_ast(source: &str) -> Result<Vec<Bop>, String> {
 	bf_code_to_ast(source).map_err(|e| match e {
 		Error::NotEof(n) => {
-			let info = format!("`eof` expected at index {}", n);
-
-			io::Error::new(io::ErrorKind::Other, info)
+			format!("`eof` expected at index {}", n)
 		}
 		Error::NotClosed(n) => {
-			let info = format!("expected `]` to close `[` at index {}", n);
-
-			io::Error::new(io::ErrorKind::Other, info)
+			format!("expected `]` to close `[` at index {}", n)
 		}
 		_ => unreachable!(),
 	})
 }
 
-fn print_file(name: &str, is_opt: bool, lang: Language) -> io::Result<()> {
-	let source = fs::read_to_string(name)?;
-	let mut ast = make_ast(source.as_str())?;
+fn translate_to_bf(name: &str, is_opt: bool, lang: Language) -> String {
+	let source = std::fs::read_to_string(name).unwrap();
+	let mut ast = make_ast(source.as_str()).expect("Failure to translate");
 
 	if is_opt {
-		ast = fold_instruction_list(ast.as_ref());
+		ast = fold_bf_code(ast.as_ref());
 	}
 
-	let source = match lang {
-		Language::Lua => lua::from_ast(ast.as_ref()),
-		Language::Python => python::from_ast(ast.as_ref()),
-	};
-
-	println!("{}", source);
-	Ok(())
+	match lang {
+		Language::Lua => target::lua::from_ast(ast.as_ref()),
+		Language::Python => target::python::from_ast(ast.as_ref()),
+	}
 }
 
-fn main() -> io::Result<()> {
+fn main() {
 	let mut is_opt = true;
 	let mut lang = Language::Lua;
 
@@ -67,10 +58,10 @@ fn main() -> io::Result<()> {
 				is_opt = false;
 			}
 			name => {
-				print_file(name, is_opt, lang)?;
+				let bf = translate_to_bf(name, is_opt, lang);
+
+				println!("{}", bf);
 			}
 		}
 	}
-
-	Ok(())
 }
