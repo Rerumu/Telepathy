@@ -27,7 +27,6 @@ impl State {
 		self.indent += 1;
 		self.write_block(code);
 		self.write_line("pass");
-		self.buffer.pop();
 		self.indent -= 1;
 	}
 
@@ -42,7 +41,6 @@ impl State {
 			self.indent += 1;
 			self.write_line("output(temp)");
 			self.indent -= 1;
-			self.buffer.push('\n');
 		}
 	}
 
