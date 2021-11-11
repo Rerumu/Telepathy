@@ -77,7 +77,9 @@ pub fn from_ast(code: &[Bop]) -> String {
 	state.write_line("output = lambda x: sys.stdout.write(chr(x))");
 	state.write_line("input = lambda: ord(sys.stdin.read(1))");
 	state.buffer.push('\n');
+
 	state.write_block(code);
+
 	state.buffer.pop();
 	state.buffer
 }

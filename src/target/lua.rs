@@ -77,7 +77,9 @@ pub fn from_ast(code: &[Bop]) -> String {
 	state.write_line("local output = function(x) io.write(string.char(x)) end");
 	state.write_line("local input = function(x) return io.read(1):byte(1, 1) end");
 	state.buffer.push('\n');
+
 	state.write_block(code);
+
 	state.buffer.pop();
 	state.buffer
 }

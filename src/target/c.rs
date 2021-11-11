@@ -76,14 +76,19 @@ pub fn from_ast(code: &[Bop]) -> String {
 	state.write_line("#include <stdint.h>");
 	state.write_line("#include <stdio.h>");
 	state.buffer.push('\n');
+
 	state.write_line("int main(void) {");
+
 	state.indent += 1;
 	state.write_line("int32_t memory[8192] = { 0 };");
 	state.write_line("size_t pointer = 0;");
 	state.buffer.push('\n');
+
 	state.write_block(code);
+
 	state.write_line("return 0;");
 	state.indent -= 1;
+
 	state.write_line("}");
 	state.buffer
 }
