@@ -72,7 +72,7 @@ pub fn from_ast(code: &[Bop]) -> String {
 
 	state.write_line("import sys");
 	state.buffer.push('\n');
-	state.write_line("memory = [0] * 8096");
+	state.write_line("memory = [0] * 8192");
 	state.write_line("pointer = 0");
 	state.write_line("output = lambda x: sys.stdout.write(chr(x))");
 	state.write_line("input = lambda: ord(sys.stdin.read(1))");
