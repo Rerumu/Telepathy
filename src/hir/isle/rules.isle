@@ -1,0 +1,148 @@
+;; Rust and Regioned primitives
+(type bool (primitive bool))
+(type u64 (primitive u64))
+(type Link (primitive Link))
+
+;; Makes interoperability with the IR easier and reduces boilerplate
+;; by providing exhaustiveness for enums.
+(type Math
+	(enum
+		(Integer (value u64))
+		(Add (lhs Link) (rhs Link))
+		(Sub (lhs Link) (rhs Link))
+	)
+)
+
+(type Memory
+	(enum
+		(Merge)
+		(Load (state Link) (pointer Link))
+		(Store (state Link) (pointer Link) (value Link))
+	)
+)
+
+(type Elided
+	(enum
+		(Merge (state Link))
+		(Load (store Link) (value Link))
+		(Store (store Link))
+	)
+)
+
+;; Declare "requests" to talk to the Graph
+(convert Math Link request_math)
+(convert Link Math request_math)
+(decl request_math (Math) Link)
+(extern constructor request_math math_to_link)
+(extern extractor request_math link_to_math)
+
+(convert Memory Link request_memory)
+(decl request_memory (Memory) Link)
+(extern extractor request_memory link_to_memory)
+
+;; Add identity rules for cancellation
+(decl partial identity (Link) Link)
+
+(rule
+	(identity (Math.Add lhs rhs))
+	(if-let (Math.Integer 0) rhs)
+	lhs
+)
+
+(rule
+	(identity (Math.Sub lhs rhs))
+	(if-let (Math.Integer 0) rhs)
+	lhs
+)
+
+
+;; Add rules for constant folding
+(decl partial fold (Link) Math)
+(decl pure fold_add (u64 u64) u64)
+(decl pure fold_sub (u64 u64) u64)
+
+(extern constructor fold_add fold_add)
+(extern constructor fold_sub fold_sub)
+
+;; (N + K1) + K2 => N + (K1 + K2)
+(rule
+	(fold (Math.Add lhs_1 rhs_1))
+	(if-let (Math.Add lhs_2 rhs_2) lhs_1)
+	(if-let (Math.Integer _) rhs_1)
+	(if-let (Math.Integer _) rhs_2)
+	(Math.Add lhs_2 (Math.Add rhs_2 rhs_1))
+)
+
+;; (N + K1) - K2 => N + (K1 - K2)
+(rule
+	(fold (Math.Sub lhs_1 rhs_1))
+	(if-let (Math.Add lhs_2 rhs_2) lhs_1)
+	(if-let (Math.Integer _) rhs_1)
+	(if-let (Math.Integer _) rhs_2)
+	(Math.Add lhs_2 (Math.Sub rhs_2 rhs_1))
+)
+
+;; (N - K1) - K2 => N - (K1 + K2)
+(rule
+	(fold (Math.Sub lhs_1 rhs_1))
+	(if-let (Math.Sub lhs_2 rhs_2) lhs_1)
+	(if-let (Math.Integer _) rhs_1)
+	(if-let (Math.Integer _) rhs_2)
+	(Math.Sub lhs_2 (Math.Add rhs_2 rhs_1))
+)
+
+;; (K1 + K2) => K3
+(rule
+    (fold (Math.Add lhs rhs))
+    (if-let (Math.Integer lhs_value) lhs)
+    (if-let (Math.Integer rhs_value) rhs)
+    (Math.Integer (fold_add lhs_value rhs_value))
+)
+
+;; (K1 - K2) => K3
+(rule
+	(fold (Math.Sub lhs rhs))
+	(if-let (Math.Integer lhs_value) lhs)
+	(if-let (Math.Integer rhs_value) rhs)
+	(Math.Integer (fold_sub lhs_value rhs_value))
+)
+
+;; Add elision rules for sequential loads and stores
+(decl partial elide (Link) Elided)
+(decl pure partial fetch_solo_state (Link) Link)
+
+(extern constructor fetch_solo_state fetch_solo_state)
+
+(rule 2
+	(elide (Memory.Load last from))
+	(if-let (Memory.Store _ from value) last)
+	(Elided.Load last value)
+)
+
+(rule 1
+	(elide (Memory.Load last from_1))
+	(if-let (Memory.Store _ from_2 value) last)
+	(if-let (Math.Integer from) from_1)
+	(if-let (Math.Integer from) from_2)
+	(Elided.Load last value)
+)
+
+(rule 2
+	(elide (Memory.Store previous from _))
+	(if-let (Memory.Store last from _) previous)
+	(Elided.Store last)
+)
+
+(rule 1
+	(elide (Memory.Store previous from_1 _))
+	(if-let (Memory.Store last from_2 _) previous)
+	(if-let (Math.Integer from) from_1)
+	(if-let (Math.Integer from) from_2)
+	(Elided.Store last)
+)
+
+(rule
+	(elide link @ (Memory.Merge))
+	(if-let state (fetch_solo_state link))
+	(Elided.Merge state)
+)
