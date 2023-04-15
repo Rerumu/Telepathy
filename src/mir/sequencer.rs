@@ -105,17 +105,17 @@ impl Sequencer {
 			}
 			Simple::Load => {
 				let state = self.registers.fetch(predecessors[0]);
-				let pointer = self.registers.fetch(predecessors[1]);
 				let post = self.registers.reuse_or_reserve(graph, first, state);
+				let pointer = self.registers.fetch(predecessors[1]);
 				let result = self.registers.reserve(graph, results.next().unwrap());
+
+				self.try_add_move(state, post);
 
 				self.add(Instruction::Load {
 					result,
 					pointer,
 					state,
 				});
-
-				self.try_add_move(state, post);
 			}
 			Simple::Store => {
 				let state = self.registers.fetch(predecessors[0]);
@@ -137,9 +137,9 @@ impl Sequencer {
 				let post = self.registers.reuse_or_reserve(graph, first, state);
 				let result = self.registers.reserve(graph, results.next().unwrap());
 
-				self.add(Instruction::Ask { result, state });
-
 				self.try_add_move(state, post);
+
+				self.add(Instruction::Ask { result, state });
 			}
 			Simple::Tell => {
 				let state = self.registers.fetch(predecessors[0]);
