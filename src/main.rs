@@ -203,7 +203,7 @@ fn process_mir(data: &ParseData) -> Program {
 	let mut topological = ReverseTopological::new();
 	let mut sequencer = Sequencer::new();
 
-	sequencer.sequence(data.graph(), data.roots(), &mut topological)
+	sequencer.sequence(data, &mut topological)
 }
 
 fn main() {

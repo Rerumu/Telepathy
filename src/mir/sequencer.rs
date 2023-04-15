@@ -8,7 +8,10 @@ use regioned::{
 	visit::reverse_topological::ReverseTopological,
 };
 
-use crate::hir::data::{Graph, Node, Simple};
+use crate::hir::{
+	data::{Graph, Node, Simple},
+	parser::ParseData,
+};
 
 use super::{
 	data::{Instruction, Program},
@@ -277,18 +280,17 @@ impl Sequencer {
 	}
 
 	#[must_use]
-	pub fn sequence<I>(
+	pub fn sequence(
 		&mut self,
-		graph: &Graph,
-		roots: I,
+		parsed: &ParseData,
 		topological: &mut ReverseTopological,
-	) -> Program
-	where
-		I: IntoIterator<Item = Id> + Clone,
-	{
+	) -> Program {
+		let graph = parsed.graph();
+		let roots = parsed.roots();
+
 		self.find_parents(graph);
 
-		self.reset(graph, roots.clone(), topological);
+		self.reset(graph, roots, topological);
 
 		topological.run_with(graph, roots, |graph, id| match graph.nodes[id] {
 			Node::Simple(simple) => self.add_simple(simple, graph, id),
