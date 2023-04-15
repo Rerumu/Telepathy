@@ -3,6 +3,9 @@ name = "telepathy"
 version = "1.0.0"
 edition = "2021"
 
+[dependencies]
+argh = "0.1.10"
+
 [dependencies.regioned]
 git = "https://github.com/Rerumu/Regioned"
 rev = "5a76154"
