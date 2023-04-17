@@ -5,9 +5,10 @@ use std::{
 
 use argh::FromArgs;
 use regioned::{
-	data_flow::{link::Port, node::Id},
+	data_flow::node::Id,
 	dot::Dot,
 	transform::{
+		relax_dependencies::RelaxDependencies,
 		revise::{self, redo_ports, redo_ports_in_place},
 		sweep,
 	},
@@ -25,6 +26,7 @@ use telepathy::{
 
 /// A `BrainFxck` optimizing compiler based on the `Regioned` implementation of
 /// a Regionalized Value State Dependence Graph.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(FromArgs)]
 struct Arguments {
 	/// the target language to compile to,
@@ -53,16 +55,19 @@ struct Arguments {
 	/// whether load and store elision should be performed
 	#[argh(switch)]
 	load_store_elide: bool,
+
+	/// whether to relax dependencies of compounds
+	#[argh(switch)]
+	relax_dependencies: bool,
 }
 
 fn run_fold_identity(successors: &Successors) -> impl FnMut(&mut Graph, Id) -> Option<Node> + '_ {
 	revise::single(
 		|graph, id| isle::identity(graph, id.into()),
 		|graph, id, value| {
-			let predecessors = &mut graph.predecessors;
-			let redo_value = |port: Port| (port.index() == 0).then_some(value.port());
-
-			redo_ports(predecessors, successors, id, value.node(), redo_value);
+			redo_ports(&mut graph.predecessors, successors, id, |port| {
+				(port.index() == 0).then_some(value)
+			});
 
 			Simple::NoOp.into()
 		},
@@ -109,11 +114,11 @@ fn run_load_store_elision(
 					Simple::NoOp.into()
 				}
 				Elided::Load { store, value } => {
-					let redo_store = |port: Port| (port.index() == 0).then_some(store.port());
-					let redo_value = |port: Port| (port.index() == 1).then_some(value.port());
-
-					redo_ports(predecessors, successors, id, store.node(), redo_store);
-					redo_ports(predecessors, successors, id, value.node(), redo_value);
+					redo_ports(predecessors, successors, id, |port| match port.index() {
+						0 => Some(store),
+						1 => Some(value),
+						_ => None,
+					});
 
 					Simple::NoOp.into()
 				}
@@ -152,6 +157,7 @@ fn run_optimization(
 	id: Id,
 	arguments: &Arguments,
 	successors: &Successors,
+	relax: &mut RelaxDependencies,
 ) -> usize {
 	let mut applied = 0;
 
@@ -169,6 +175,10 @@ fn run_optimization(
 		applied += 1;
 	}
 
+	if arguments.relax_dependencies && applied == 0 && relax.run(graph, id, successors) != 0 {
+		applied += 1;
+	}
+
 	applied
 }
 
@@ -177,6 +187,7 @@ fn process_hir(code: &str, arguments: &Arguments) -> ParseData {
 	let mut data = parser.parse(code.char_indices()).unwrap();
 
 	let roots = data.roots();
+	let mut relax = RelaxDependencies::new();
 	let mut successors = Successors::new();
 	let mut topological = ReverseTopological::new();
 
@@ -186,7 +197,7 @@ fn process_hir(code: &str, arguments: &Arguments) -> ParseData {
 		successors.run(data.graph(), roots, &mut topological);
 
 		topological.run_with_mut(data.graph_mut(), roots, |graph, id| {
-			applied += run_optimization(graph, id, arguments, &successors);
+			applied += run_optimization(graph, id, arguments, &successors, &mut relax);
 		});
 
 		if applied == 0 {
@@ -212,6 +223,7 @@ fn main() {
 	if arguments.optimize {
 		arguments.constant_fold = true;
 		arguments.load_store_elide = true;
+		arguments.relax_dependencies = true;
 	}
 
 	let input = load_input(arguments.input.as_deref());

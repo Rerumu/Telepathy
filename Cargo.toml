@@ -8,7 +8,7 @@ argh = "0.1.10"
 
 [dependencies.regioned]
 git = "https://github.com/Rerumu/Regioned"
-rev = "5a76154"
+rev = "60c375d"
 features = ["dot"]
 
 [build-dependencies]
