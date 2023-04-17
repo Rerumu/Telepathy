@@ -48,11 +48,11 @@ struct Arguments {
 
 	/// whether constant folding should be performed
 	#[argh(switch)]
-	constant_folding: bool,
+	constant_fold: bool,
 
 	/// whether load and store elision should be performed
 	#[argh(switch)]
-	load_store_elision: bool,
+	load_store_elide: bool,
 }
 
 fn run_fold_identity(successors: &Successors) -> impl FnMut(&mut Graph, Id) -> Option<Node> + '_ {
@@ -155,7 +155,7 @@ fn run_optimization(
 ) -> usize {
 	let mut applied = 0;
 
-	if arguments.constant_folding {
+	if arguments.constant_fold {
 		if run_fold_identity(successors)(graph, id).is_some() {
 			applied += 1;
 		}
@@ -165,7 +165,7 @@ fn run_optimization(
 		}
 	}
 
-	if arguments.load_store_elision && run_load_store_elision(successors)(graph, id).is_some() {
+	if arguments.load_store_elide && run_load_store_elision(successors)(graph, id).is_some() {
 		applied += 1;
 	}
 
@@ -183,8 +183,6 @@ fn process_hir(code: &str, arguments: &Arguments) -> ParseData {
 	loop {
 		let mut applied = 0;
 
-		sweep::run(data.graph_mut(), roots, &mut topological);
-
 		successors.run(data.graph(), roots, &mut topological);
 
 		topological.run_with_mut(data.graph_mut(), roots, |graph, id| {
@@ -195,6 +193,8 @@ fn process_hir(code: &str, arguments: &Arguments) -> ParseData {
 			break;
 		}
 	}
+
+	sweep::run(data.graph_mut(), roots, &mut topological);
 
 	data
 }
@@ -210,8 +210,8 @@ fn main() {
 	let mut arguments = argh::from_env::<Arguments>();
 
 	if arguments.optimize {
-		arguments.constant_folding = true;
-		arguments.load_store_elision = true;
+		arguments.constant_fold = true;
+		arguments.load_store_elide = true;
 	}
 
 	let input = load_input(arguments.input.as_deref());
