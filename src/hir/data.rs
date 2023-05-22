@@ -1,59 +1,140 @@
-use std::fmt::Debug;
+use std::io::{Result, Write};
 
 use regioned::{
 	data_flow::{
-		link::Link,
-		node::{Id, Region},
+		link::{Id, Link, Region},
+		node::{AsParametersMut, Parameters, ParametersMut},
 	},
-	dot::label::Label,
+	dot::Description,
 };
 
-#[derive(Debug, Clone, Copy)]
 pub enum Simple {
 	NoOp,
 
-	Merge,
+	Merge {
+		states: Vec<Link>,
+	},
 	Memory,
 	IO,
 
-	Integer(u64),
+	Integer {
+		value: u64,
+	},
 
-	Add,
-	Sub,
+	Add {
+		lhs: Link,
+		rhs: Link,
+	},
+	Sub {
+		lhs: Link,
+		rhs: Link,
+	},
 
-	Load,
-	Store,
+	Load {
+		state: Link,
+		pointer: Link,
+	},
+	Store {
+		state: Link,
+		pointer: Link,
+		value: Link,
+	},
 
-	Ask,
-	Tell,
+	Ask {
+		state: Link,
+	},
+	Tell {
+		state: Link,
+		value: Link,
+	},
 }
 
-impl Label for Simple {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		Debug::fmt(self, f)
+impl Simple {
+	const fn name(&self) -> &'static str {
+		match self {
+			Self::NoOp => "NoOp",
+			Self::Merge { .. } => "Merge",
+			Self::Memory => "Memory",
+			Self::IO => "IO",
+			Self::Integer { .. } => "Integer",
+			Self::Add { .. } => "Add",
+			Self::Sub { .. } => "Sub",
+			Self::Load { .. } => "Load",
+			Self::Store { .. } => "Store",
+			Self::Ask { .. } => "Ask",
+			Self::Tell { .. } => "Tell",
+		}
+	}
+}
+
+impl AsParametersMut for Simple {
+	fn as_parameters_mut(&mut self) -> Option<&mut Vec<Link>> {
+		None
+	}
+}
+
+// FIXME: These should use custom iterators that avoid allocating.
+impl Parameters for Simple {
+	type Iter<'a> = std::vec::IntoIter<&'a Link>;
+
+	fn parameters(&self) -> Self::Iter<'_> {
+		let results = match self {
+			Self::NoOp | Self::Memory | Self::IO | Self::Integer { .. } => Vec::new(),
+			Self::Merge { states } => states.iter().collect(),
+			Self::Add { lhs, rhs } | Self::Sub { lhs, rhs } => vec![lhs, rhs],
+			Self::Load { state, pointer } => vec![state, pointer],
+			Self::Store {
+				state,
+				pointer,
+				value,
+			} => vec![state, pointer, value],
+			Self::Ask { state } => vec![state],
+			Self::Tell { state, value } => vec![state, value],
+		};
+
+		results.into_iter()
+	}
+}
+
+impl ParametersMut for Simple {
+	type Iter<'a> = std::vec::IntoIter<&'a mut Link>;
+
+	fn parameters_mut(&mut self) -> Self::Iter<'_> {
+		let results = match self {
+			Self::NoOp | Self::Memory | Self::IO | Self::Integer { .. } => Vec::new(),
+			Self::Merge { states } => states.iter_mut().collect(),
+			Self::Add { lhs, rhs } | Self::Sub { lhs, rhs } => vec![lhs, rhs],
+			Self::Load { state, pointer } => vec![state, pointer],
+			Self::Store {
+				state,
+				pointer,
+				value,
+			} => vec![state, pointer, value],
+			Self::Ask { state } => vec![state],
+			Self::Tell { state, value } => vec![state, value],
+		};
+
+		results.into_iter()
+	}
+}
+
+impl Description for Simple {
+	fn write_content(&self, writer: &mut dyn Write) -> Result<()> {
+		write!(writer, "{}", self.name())
 	}
 }
 
 impl From<Simple> for Node {
-	fn from(op: Simple) -> Self {
-		Node::Simple(op)
+	fn from(value: Simple) -> Self {
+		Self::Simple(value)
 	}
 }
 
 pub type Node = regioned::data_flow::node::Node<Simple>;
 
-pub type Graph = regioned::data_flow::graph::Graph<Simple>;
+pub type Nodes = regioned::data_flow::nodes::Nodes<Simple>;
 
 pub trait Builder {
-	fn add_single<T>(&mut self, node: T) -> Link
-	where
-		T: Into<Node>;
-
-	fn add_parametrized<T, I>(&mut self, node: T, params: I) -> Link
-	where
-		T: Into<Node>,
-		I: IntoIterator<Item = Link>;
-
 	fn add_integer(&mut self, value: u64) -> Link;
 
 	fn add_passthrough(&mut self, start: Id, end: Id, len: usize);
@@ -61,35 +142,15 @@ pub trait Builder {
 	fn add_identity_handle(&mut self, parent: Region);
 }
 
-impl Builder for Graph {
-	fn add_single<T>(&mut self, node: T) -> Link
-	where
-		T: Into<Node>,
-	{
-		self.add_node(node.into()).into()
-	}
-
-	fn add_parametrized<T, I>(&mut self, node: T, params: I) -> Link
-	where
-		T: Into<Node>,
-		I: IntoIterator<Item = Link>,
-	{
-		let link = self.add_single(node);
-		let predecessors = params.into_iter().collect();
-
-		self.predecessors[link.node()] = predecessors;
-
-		link
-	}
-
+impl Builder for Nodes {
 	fn add_integer(&mut self, value: u64) -> Link {
-		self.add_single(Simple::Integer(value))
+		self.add_simple(Simple::Integer { value }).into()
 	}
 
 	fn add_passthrough(&mut self, start: Id, end: Id, len: usize) {
 		let iter = Link::from(start).iter().take(len);
 
-		self.predecessors[end].extend(iter);
+		self[end].as_parameters_mut().unwrap().extend(iter);
 	}
 
 	fn add_identity_handle(&mut self, parent: Region) {

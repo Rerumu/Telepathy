@@ -7,13 +7,13 @@
 	unused_variables
 )]
 mod internal {
-	use regioned::data_flow::link::Link;
+	use regioned::data_flow::{link::Link, node::Parameters};
 
-	use crate::hir::data::{Builder, Graph, Simple};
+	use crate::hir::data::{Builder, Nodes, Simple};
 
 	include!(concat!(env!("OUT_DIR"), "/isle_internal.rs"));
 
-	impl Context for Graph {
+	impl Context for Nodes {
 		fn fold_add(&mut self, lhs: u64, rhs: u64) -> u64 {
 			lhs.wrapping_add(rhs)
 		}
@@ -23,25 +23,18 @@ mod internal {
 		}
 
 		fn fetch_solo_state(&mut self, link: Link) -> Option<Link> {
-			let mut predecessors = self.predecessors[link.node()].iter();
+			let mut predecessors = self[link.node].parameters();
 			let first = predecessors.next().copied();
 
 			first.filter(|first| predecessors.all(|node| node == first))
 		}
 
 		fn link_to_math(&mut self, link: Link) -> Option<Math> {
-			self.nodes[link.node()].as_simple().and_then(|&node| {
-				let predecessors = &self.predecessors[link.node()];
-				let node = match node {
-					Simple::Integer(value) => Math::Integer { value },
-					Simple::Add => Math::Add {
-						lhs: predecessors[0],
-						rhs: predecessors[1],
-					},
-					Simple::Sub => Math::Sub {
-						lhs: predecessors[0],
-						rhs: predecessors[1],
-					},
+			self[link.node].as_simple().and_then(|node| {
+				let node = match *node {
+					Simple::Integer { value } => Math::Integer { value },
+					Simple::Add { lhs, rhs } => Math::Add { lhs, rhs },
+					Simple::Sub { lhs, rhs } => Math::Sub { lhs, rhs },
 					_ => return None,
 				};
 
@@ -50,26 +43,28 @@ mod internal {
 		}
 
 		fn math_to_link(&mut self, node: &Math) -> Link {
-			match *node {
-				Math::Integer { value } => self.add_single(Simple::Integer(value)),
-				Math::Add { lhs, rhs } => self.add_parametrized(Simple::Add, [lhs, rhs]),
-				Math::Sub { lhs, rhs } => self.add_parametrized(Simple::Sub, [lhs, rhs]),
-			}
+			let node = match *node {
+				Math::Integer { value } => Simple::Integer { value },
+				Math::Add { lhs, rhs } => Simple::Add { lhs, rhs },
+				Math::Sub { lhs, rhs } => Simple::Sub { lhs, rhs },
+			};
+
+			self.add_simple(node).into()
 		}
 
 		fn link_to_memory(&mut self, link: Link) -> Option<Memory> {
-			self.nodes[link.node()].as_simple().and_then(|&node| {
-				let predecessors = &self.predecessors[link.node()];
-				let node = match node {
-					Simple::Merge => Memory::Merge,
-					Simple::Load => Memory::Load {
-						state: predecessors[0],
-						pointer: predecessors[1],
-					},
-					Simple::Store => Memory::Store {
-						state: predecessors[0],
-						pointer: predecessors[1],
-						value: predecessors[2],
+			self[link.node].as_simple().and_then(|node| {
+				let node = match *node {
+					Simple::Merge { .. } => Memory::Merge,
+					Simple::Load { state, pointer } => Memory::Load { state, pointer },
+					Simple::Store {
+						state,
+						pointer,
+						value,
+					} => Memory::Store {
+						state,
+						pointer,
+						value,
 					},
 					_ => return None,
 				};

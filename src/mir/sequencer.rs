@@ -2,14 +2,14 @@ use std::collections::HashMap;
 
 use regioned::{
 	data_flow::{
-		link::Link,
-		node::{Compound, Id, Marker},
+		link::{Id, Link, Region},
+		node::{Compound, Marker, Parameters},
 	},
 	visit::reverse_topological::ReverseTopological,
 };
 
 use crate::hir::{
-	data::{Graph, Node, Simple},
+	data::{Node, Nodes, Simple},
 	parser::ParseData,
 };
 
@@ -33,14 +33,14 @@ impl Sequencer {
 		Self::default()
 	}
 
-	fn reset<I>(&mut self, graph: &Graph, roots: I, topological: &mut ReverseTopological)
+	fn reset<I>(&mut self, nodes: &Nodes, roots: I, topological: &mut ReverseTopological)
 	where
 		I: IntoIterator<Item = Id>,
 	{
 		self.bodies.push(Vec::new());
 		self.regions.clear();
 		self.regions.push(0);
-		self.registers.reset(graph, roots, topological);
+		self.registers.reset(nodes, roots, topological);
 	}
 
 	fn add(&mut self, instruction: Instruction) {
@@ -59,58 +59,54 @@ impl Sequencer {
 		self.add(instruction);
 	}
 
-	fn add_simple(&mut self, simple: Simple, graph: &Graph, id: Id) {
+	fn add_simple(&mut self, simple: &Simple, nodes: &Nodes, id: Id) {
 		let mut results = Link::from(id).iter();
 		let first = results.next().unwrap();
-		let predecessors = &graph.predecessors[id];
 
-		match simple {
+		match *simple {
 			Simple::NoOp => {}
-			Simple::Merge => {
-				let iter = predecessors
-					.iter()
-					.rev()
-					.map(|link| self.registers.fetch(*link));
+			Simple::Merge { ref states } => {
+				let iter = states.iter().rev().map(|link| self.registers.fetch(*link));
 
 				let result = iter.last().unwrap();
-				let post = self.registers.reuse_or_reserve(graph, first, result);
+				let post = self.registers.reuse_or_reserve(nodes, first, result);
 
 				self.try_add_move(result, post);
 			}
 			Simple::Memory => {
-				let result = self.registers.reserve(graph, first);
+				let result = self.registers.reserve(nodes, first);
 
 				self.add(Instruction::Memory { result });
 			}
 			Simple::IO => {
-				let result = self.registers.reserve(graph, first);
+				let result = self.registers.reserve(nodes, first);
 
 				self.add(Instruction::IO { result });
 			}
-			Simple::Integer(value) => {
-				let result = self.registers.reserve(graph, first);
+			Simple::Integer { value } => {
+				let result = self.registers.reserve(nodes, first);
 
 				self.add(Instruction::Integer { result, value });
 			}
-			Simple::Add => {
-				let lhs = self.registers.fetch(predecessors[0]);
-				let rhs = self.registers.fetch(predecessors[1]);
-				let result = self.registers.reserve(graph, first);
+			Simple::Add { lhs, rhs } => {
+				let lhs = self.registers.fetch(lhs);
+				let rhs = self.registers.fetch(rhs);
+				let result = self.registers.reserve(nodes, first);
 
 				self.add(Instruction::Add { result, lhs, rhs });
 			}
-			Simple::Sub => {
-				let lhs = self.registers.fetch(predecessors[0]);
-				let rhs = self.registers.fetch(predecessors[1]);
-				let result = self.registers.reserve(graph, first);
+			Simple::Sub { lhs, rhs } => {
+				let lhs = self.registers.fetch(lhs);
+				let rhs = self.registers.fetch(rhs);
+				let result = self.registers.reserve(nodes, first);
 
 				self.add(Instruction::Sub { result, lhs, rhs });
 			}
-			Simple::Load => {
-				let state = self.registers.fetch(predecessors[0]);
-				let post = self.registers.reuse_or_reserve(graph, first, state);
-				let pointer = self.registers.fetch(predecessors[1]);
-				let result = self.registers.reserve(graph, results.next().unwrap());
+			Simple::Load { state, pointer } => {
+				let state = self.registers.fetch(state);
+				let post = self.registers.reuse_or_reserve(nodes, first, state);
+				let pointer = self.registers.fetch(pointer);
+				let result = self.registers.reserve(nodes, results.next().unwrap());
 
 				self.try_add_move(state, post);
 
@@ -120,10 +116,14 @@ impl Sequencer {
 					state,
 				});
 			}
-			Simple::Store => {
-				let state = self.registers.fetch(predecessors[0]);
-				let pointer = self.registers.fetch(predecessors[1]);
-				let value = self.registers.fetch(predecessors[2]);
+			Simple::Store {
+				state,
+				pointer,
+				value,
+			} => {
+				let state = self.registers.fetch(state);
+				let pointer = self.registers.fetch(pointer);
+				let value = self.registers.fetch(value);
 
 				self.add(Instruction::Store {
 					pointer,
@@ -131,75 +131,74 @@ impl Sequencer {
 					state,
 				});
 
-				let post = self.registers.reuse_or_reserve(graph, first, state);
+				let post = self.registers.reuse_or_reserve(nodes, first, state);
 
 				self.try_add_move(state, post);
 			}
-			Simple::Ask => {
-				let state = self.registers.fetch(predecessors[0]);
-				let post = self.registers.reuse_or_reserve(graph, first, state);
-				let result = self.registers.reserve(graph, results.next().unwrap());
+			Simple::Ask { state } => {
+				let state = self.registers.fetch(state);
+				let post = self.registers.reuse_or_reserve(nodes, first, state);
+				let result = self.registers.reserve(nodes, results.next().unwrap());
 
 				self.try_add_move(state, post);
 
 				self.add(Instruction::Ask { result, state });
 			}
-			Simple::Tell => {
-				let state = self.registers.fetch(predecessors[0]);
-				let value = self.registers.fetch(predecessors[1]);
+			Simple::Tell { state, value } => {
+				let state = self.registers.fetch(state);
+				let value = self.registers.fetch(value);
 
 				self.add(Instruction::Tell { value, state });
 
-				let post = self.registers.reuse_or_reserve(graph, first, state);
+				let post = self.registers.reuse_or_reserve(nodes, first, state);
 
 				self.try_add_move(state, post);
 			}
 		}
 	}
 
-	fn add_start_marker(&mut self, graph: &Graph, id: Id, parent: Id) {
-		let predecessors = &graph.predecessors[parent];
-		let iter = Link::from(id).iter().zip(predecessors);
-
-		match graph.nodes[parent] {
+	fn add_start_marker(&mut self, nodes: &Nodes, id: Id, parent: Id) {
+		match &nodes[parent] {
 			// `Gamma` requires for the first region we reserve all result registers. Later, the
 			// registers are used to join all the results.
-			Node::Compound(Compound::Gamma) => {
-				let region = graph.regions[&parent][0];
-
-				if region.start() == id {
+			Node::Compound(Compound::Gamma {
+				parameters,
+				regions,
+			}) => {
+				if regions[0].start() == id {
 					// Discard all predecessor references.
-					for link in predecessors {
+					for link in parameters {
 						self.registers.fetch(*link);
 					}
 
-					let results = graph.predecessors[region.end()].len();
+					let results = nodes[regions[0].end()].parameters().len();
 
 					// Reserve as many registers as there are results.
 					for link in Link::from(parent).iter().take(results) {
-						self.registers.reserve(graph, link);
+						self.registers.reserve(nodes, link);
 					}
 				}
 
 				// Reuse input registers directly for each region.
-				iter.for_each(|entry| {
+				Link::from(id).iter().zip(parameters).for_each(|entry| {
 					let predecessor = self.registers.assigned().get(*entry.1);
 
-					self.registers.reuse(graph, entry.0, predecessor);
+					self.registers.reuse(nodes, entry.0, predecessor);
 				});
 			}
 			// `Theta` likewise requires we reserve all result registers. However, these are also the
 			// input registers and as such must be moved before the first iteration.
-			Node::Compound(Compound::Theta) => {
+			Node::Compound(Compound::Theta { parameters, .. }) => {
 				let ends = Link::from(parent).iter();
+				let iter = Link::from(id).iter().zip(parameters).zip(ends);
 
 				// Discard predecessor, reserve matching result, reuse the register as input,
 				// and move the input there.
-				iter.zip(ends).for_each(|(entry, end)| {
+				iter.for_each(|(entry, end)| {
 					let from = self.registers.fetch(*entry.1);
-					let to = self.registers.reuse_or_reserve(graph, entry.0, from);
+					let to = self.registers.reuse_or_reserve(nodes, entry.0, from);
 
-					self.registers.reuse(graph, end, to);
+					self.registers.reuse(nodes, end, to);
 
 					self.try_add_move(from, to);
 				});
@@ -211,15 +210,15 @@ impl Sequencer {
 		self.bodies.push(Vec::new());
 	}
 
-	fn add_end_marker(&mut self, graph: &Graph, id: Id, parent: Id) {
-		let mut predecessors = graph.predecessors[id].iter();
+	fn add_end_marker(&mut self, nodes: &Nodes, parameters: &[Link], parent: Id) {
+		let mut parameters = parameters.iter();
 
-		if graph.nodes[parent].as_compound() == Some(Compound::Theta) {
+		if matches!(nodes[parent], Node::Compound(Compound::Theta { .. })) {
 			// Do not use the last predecessor, which is the condition.
-			predecessors.next_back();
+			parameters.next_back();
 		}
 
-		for (to, from) in Link::from(parent).iter().zip(predecessors) {
+		for (to, from) in Link::from(parent).iter().zip(parameters) {
 			let to = self.registers.assigned().get(to);
 			let from = self.registers.fetch(*from);
 
@@ -227,54 +226,54 @@ impl Sequencer {
 		}
 	}
 
-	fn add_marker(&mut self, marker: Marker, graph: &Graph, id: Id) {
+	fn add_marker(&mut self, marker: &Marker, nodes: &Nodes, id: Id) {
 		let parent = self.parents[&id];
 
 		match marker {
-			Marker::Start => self.add_start_marker(graph, id, parent),
-			Marker::End => self.add_end_marker(graph, id, parent),
+			Marker::Start => self.add_start_marker(nodes, id, parent),
+			Marker::End { parameters } => self.add_end_marker(nodes, parameters, parent),
 		}
 	}
 
-	fn add_gamma(&mut self, graph: &Graph, id: Id) {
-		let condition = graph.predecessors[id].last().unwrap();
+	fn add_gamma(&mut self, parameters: &[Link], regions: &[Region]) {
+		let condition = parameters.last().unwrap();
 		let condition = self.registers.assigned().get(*condition);
 
-		let regions = graph.regions[&id].len();
+		let regions = regions.len();
 		let code = self.regions.drain(self.regions.len() - regions..).collect();
 
 		self.add(Instruction::Select { condition, code });
 	}
 
-	fn add_theta(&mut self, graph: &Graph, id: Id) {
+	fn add_theta(&mut self, nodes: &Nodes, region: Region) {
 		let code = self.regions.pop().unwrap();
 
-		let region = graph.regions[&id][0];
-		let condition = graph.predecessors[region.end()].last().unwrap();
+		let condition = nodes[region.end()].parameters().last().unwrap();
 		let condition = self.registers.assigned().get(*condition);
 
 		self.add(Instruction::Repeat { code, condition });
 	}
 
-	fn add_compound(&mut self, compound: Compound, graph: &Graph, id: Id) {
+	fn add_compound(&mut self, compound: &Compound, nodes: &Nodes) {
 		match compound {
-			Compound::Gamma => self.add_gamma(graph, id),
-			Compound::Theta => self.add_theta(graph, id),
-			Compound::Lambda | Compound::Phi => unreachable!(),
+			Compound::Gamma {
+				parameters,
+				regions,
+			} => self.add_gamma(parameters, regions),
+			Compound::Theta { region, .. } => self.add_theta(nodes, *region),
+			Compound::Lambda { .. } | Compound::Phi { .. } => unreachable!(),
 		}
 	}
 
-	fn find_parents(&mut self, graph: &Graph) {
+	fn find_parents(&mut self, nodes: &Nodes) {
 		self.parents.clear();
 
-		for (id, node) in &graph.nodes {
-			if node.as_compound().is_none() {
-				continue;
-			}
-
-			for region in &graph.regions[&id] {
-				self.parents.insert(region.start(), id);
-				self.parents.insert(region.end(), id);
+		for (id, node) in nodes.iter() {
+			if let Node::Compound(compound) = node {
+				for region in compound.regions() {
+					self.parents.insert(region.start(), id);
+					self.parents.insert(region.end(), id);
+				}
 			}
 		}
 	}
@@ -285,18 +284,20 @@ impl Sequencer {
 		parsed: &ParseData,
 		topological: &mut ReverseTopological,
 	) -> Program {
-		let graph = parsed.graph();
+		let nodes = parsed.nodes();
 		let roots = parsed.roots();
 
-		self.find_parents(graph);
+		self.find_parents(nodes);
 
-		self.reset(graph, roots, topological);
+		self.reset(nodes, roots, topological);
 
-		topological.run_with(graph, roots, |graph, id| match graph.nodes[id] {
-			Node::Simple(simple) => self.add_simple(simple, graph, id),
-			Node::Marker(marker) => self.add_marker(marker, graph, id),
-			Node::Compound(compound) => self.add_compound(compound, graph, id),
-		});
+		for id in topological.iter(nodes, roots) {
+			match &nodes[id] {
+				Node::Simple(simple) => self.add_simple(simple, nodes, id),
+				Node::Marker(marker) => self.add_marker(marker, nodes, id),
+				Node::Compound(compound) => self.add_compound(compound, nodes),
+			}
+		}
 
 		let bodies = std::mem::take(&mut self.bodies)
 			.into_iter()

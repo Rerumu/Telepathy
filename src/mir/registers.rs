@@ -1,9 +1,12 @@
 use regioned::{
-	data_flow::{link::Link, node::Id},
+	data_flow::{
+		link::{Id, Link},
+		node::Parameters,
+	},
 	visit::{reverse_topological::ReverseTopological, successors::Successors},
 };
 
-use crate::hir::data::Graph;
+use crate::hir::data::Nodes;
 
 #[derive(Default)]
 pub struct ResultMap {
@@ -11,8 +14,8 @@ pub struct ResultMap {
 }
 
 impl ResultMap {
-	fn reset(&mut self, graph: &Graph) {
-		let active = graph.active();
+	fn reset(&mut self, nodes: &Nodes) {
+		let active = nodes.active();
 
 		self.results.iter_mut().for_each(Vec::clear);
 
@@ -22,14 +25,14 @@ impl ResultMap {
 	}
 
 	pub fn get(&self, link: Link) -> u32 {
-		let index = usize::from(link.port().index());
+		let index = usize::from(link.port);
 
-		self.results[link.node()][index]
+		self.results[link.node][index]
 	}
 
 	pub fn set(&mut self, link: Link, register: u32) {
-		let index = usize::from(link.port().index());
-		let list = &mut self.results[link.node()];
+		let index = usize::from(link.port);
+		let list = &mut self.results[link.node];
 
 		if index >= list.len() {
 			list.resize(index + 1, 0);
@@ -48,16 +51,16 @@ pub struct Registers {
 }
 
 impl Registers {
-	pub fn reset<I>(&mut self, graph: &Graph, roots: I, topological: &mut ReverseTopological)
+	pub fn reset<I>(&mut self, nodes: &Nodes, roots: I, topological: &mut ReverseTopological)
 	where
 		I: IntoIterator<Item = Id>,
 	{
-		self.successors.run(graph, roots, topological);
-		self.assigned.reset(graph);
+		self.successors.run(nodes, roots, topological);
+		self.assigned.reset(nodes);
 		self.remaining.clear();
 	}
 
-	pub fn assigned(&self) -> &ResultMap {
+	pub const fn assigned(&self) -> &ResultMap {
 		&self.assigned
 	}
 
@@ -65,11 +68,11 @@ impl Registers {
 		self.remaining.len()
 	}
 
-	fn references_count(&self, graph: &Graph, value: Link) -> usize {
-		let successors = self.successors.cache()[value.node()].iter();
+	fn references_count(&self, nodes: &Nodes, value: Link) -> usize {
+		let successors = self.successors.cache()[value.node].iter();
 
 		successors
-			.flat_map(|&id| &graph.predecessors[id])
+			.flat_map(|&id| nodes[id].parameters())
 			.filter(|&&link| link == value)
 			.count()
 	}
@@ -93,31 +96,31 @@ impl Registers {
 		register
 	}
 
-	pub fn reuse(&mut self, graph: &Graph, link: Link, register: u32) {
+	pub fn reuse(&mut self, nodes: &Nodes, link: Link, register: u32) {
 		let index = usize::try_from(register).unwrap();
 
 		self.assigned.set(link, register);
 
-		self.remaining[index] += self.references_count(graph, link);
+		self.remaining[index] += self.references_count(nodes, link);
 	}
 
-	pub fn reserve(&mut self, graph: &Graph, link: Link) -> u32 {
+	pub fn reserve(&mut self, nodes: &Nodes, link: Link) -> u32 {
 		let register = self.next_available();
 
-		self.reuse(graph, link, register);
+		self.reuse(nodes, link, register);
 
 		register
 	}
 
-	pub fn reuse_or_reserve(&mut self, graph: &Graph, link: Link, preferred: u32) -> u32 {
+	pub fn reuse_or_reserve(&mut self, nodes: &Nodes, link: Link, preferred: u32) -> u32 {
 		let index = usize::try_from(preferred).unwrap();
 
 		if self.remaining[index] == 0 {
-			self.reuse(graph, link, preferred);
+			self.reuse(nodes, link, preferred);
 
 			preferred
 		} else {
-			self.reserve(graph, link)
+			self.reserve(nodes, link)
 		}
 	}
 }

@@ -5,19 +5,19 @@ use std::{
 
 use argh::FromArgs;
 use regioned::{
-	data_flow::node::Id,
+	data_flow::link::Id,
 	dot::Dot,
 	transform::{
 		relax_dependencies::RelaxDependencies,
+		retain_only,
 		revise::{self, redo_ports, redo_ports_in_place},
-		sweep,
 	},
 	visit::{reverse_topological::ReverseTopological, successors::Successors},
 };
 use telepathy::{
 	codegen,
 	hir::{
-		data::{Graph, Node, Simple},
+		data::{Node, Nodes, Simple},
 		isle::{self, Elided, Math},
 		parser::{ParseData, Parser},
 	},
@@ -61,73 +61,65 @@ struct Arguments {
 	relax_dependencies: bool,
 }
 
-fn run_fold_identity(successors: &Successors) -> impl FnMut(&mut Graph, Id) -> Option<Node> + '_ {
+fn run_fold_identity(successors: &Successors) -> impl FnMut(&mut Nodes, Id) -> Option<Node> + '_ {
 	revise::single(
-		|graph, id| isle::identity(graph, id.into()),
-		|graph, id, value| {
-			redo_ports(&mut graph.predecessors, successors, id, |port| {
-				(port.index() == 0).then_some(value)
-			});
+		|nodes, id| isle::identity(nodes, id.into()),
+		|nodes, id, value| {
+			redo_ports(nodes, successors, id, |port| (port == 0).then_some(value));
 
 			Simple::NoOp.into()
 		},
 	)
 }
 
-fn run_fold_expressions() -> impl FnMut(&mut Graph, Id) -> Option<Node> {
+fn run_fold_expressions() -> impl FnMut(&mut Nodes, Id) -> Option<Node> {
 	revise::single(
-		|graph, id| isle::fold(graph, id.into()),
-		|graph, id, math| {
-			let predecessors = &mut graph.predecessors[id];
+		|nodes, id| isle::fold(nodes, id.into()),
+		|_, _, math| {
+			let result = match math {
+				Math::Integer { value } => Simple::Integer { value },
+				Math::Add { lhs, rhs } => Simple::Add { lhs, rhs },
+				Math::Sub { lhs, rhs } => Simple::Sub { lhs, rhs },
+			};
 
-			predecessors.clear();
-
-			match math {
-				Math::Integer { value } => Simple::Integer(value).into(),
-				Math::Add { lhs, rhs } => {
-					predecessors.extend([lhs, rhs]);
-
-					Simple::Add.into()
-				}
-				Math::Sub { lhs, rhs } => {
-					predecessors.extend([lhs, rhs]);
-
-					Simple::Sub.into()
-				}
-			}
+			result.into()
 		},
 	)
 }
 
 fn run_load_store_elision(
 	successors: &Successors,
-) -> impl FnMut(&mut Graph, Id) -> Option<Node> + '_ {
+) -> impl FnMut(&mut Nodes, Id) -> Option<Node> + '_ {
 	revise::single(
-		|graph, id| isle::elide(graph, id.into()),
-		|graph, id, elided| {
-			let predecessors = &mut graph.predecessors;
-
-			match elided {
+		|nodes, id| isle::elide(nodes, id.into()),
+		|nodes, id, elided| {
+			let result = match elided {
 				Elided::Merge { state } => {
-					redo_ports_in_place(predecessors, successors, id, state.node());
+					redo_ports_in_place(nodes, successors, id, state.node);
 
-					Simple::NoOp.into()
+					Simple::NoOp
 				}
 				Elided::Load { store, value } => {
-					redo_ports(predecessors, successors, id, |port| match port.index() {
+					redo_ports(nodes, successors, id, |port| match port {
 						0 => Some(store),
 						1 => Some(value),
 						_ => None,
 					});
 
-					Simple::NoOp.into()
+					Simple::NoOp
 				}
-				Elided::Store { store } => {
-					predecessors[id][0] = store;
+				Elided::Store {
+					store,
+					pointer,
+					value,
+				} => Simple::Store {
+					state: store,
+					pointer,
+					value,
+				},
+			};
 
-					Simple::Store.into()
-				}
-			}
+			result.into()
 		},
 	)
 }
@@ -153,7 +145,7 @@ fn load_output(name: Option<&str>) -> Box<dyn Write> {
 }
 
 fn run_optimization(
-	graph: &mut Graph,
+	nodes: &mut Nodes,
 	id: Id,
 	arguments: &Arguments,
 	successors: &Successors,
@@ -162,20 +154,23 @@ fn run_optimization(
 	let mut applied = 0;
 
 	if arguments.constant_fold {
-		if run_fold_identity(successors)(graph, id).is_some() {
+		if run_fold_identity(successors)(nodes, id).is_some() {
 			applied += 1;
 		}
 
-		if run_fold_expressions()(graph, id).is_some() {
+		if run_fold_expressions()(nodes, id).is_some() {
 			applied += 1;
 		}
 	}
 
-	if arguments.load_store_elide && run_load_store_elision(successors)(graph, id).is_some() {
+	if arguments.load_store_elide && run_load_store_elision(successors)(nodes, id).is_some() {
 		applied += 1;
 	}
 
-	if arguments.relax_dependencies && applied == 0 && relax.run(graph, id, successors) != 0 {
+	if arguments.relax_dependencies
+		&& applied == 0
+		&& relax.run(nodes, id, successors).unwrap_or_default() != 0
+	{
 		applied += 1;
 	}
 
@@ -187,6 +182,7 @@ fn process_hir(code: &str, arguments: &Arguments) -> ParseData {
 	let mut data = parser.parse(code.char_indices()).unwrap();
 
 	let roots = data.roots();
+	let mut list = Vec::new();
 	let mut relax = RelaxDependencies::new();
 	let mut successors = Successors::new();
 	let mut topological = ReverseTopological::new();
@@ -194,18 +190,21 @@ fn process_hir(code: &str, arguments: &Arguments) -> ParseData {
 	loop {
 		let mut applied = 0;
 
-		successors.run(data.graph(), roots, &mut topological);
+		list.clear();
+		list.extend(topological.iter(data.nodes(), roots));
 
-		topological.run_with_mut(data.graph_mut(), roots, |graph, id| {
-			applied += run_optimization(graph, id, arguments, &successors, &mut relax);
-		});
+		successors.run(data.nodes(), roots, &mut topological);
+
+		for &id in &list {
+			applied += run_optimization(data.nodes_mut(), id, arguments, &successors, &mut relax);
+		}
 
 		if applied == 0 {
 			break;
 		}
 	}
 
-	sweep::run(data.graph_mut(), roots, &mut topological);
+	retain_only::run(data.nodes_mut(), roots, &mut topological);
 
 	data
 }
@@ -232,7 +231,7 @@ fn main() {
 	let output = &mut load_output(arguments.output.as_deref());
 
 	let result = match arguments.target.as_str() {
-		"dot" => Dot::new(data.graph()).write(output, data.roots()),
+		"dot" => Dot::new().write(output, data.nodes(), data.roots()),
 		"c" => {
 			let program = process_mir(&data);
 

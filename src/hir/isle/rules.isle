@@ -25,7 +25,7 @@
 	(enum
 		(Merge (state Link))
 		(Load (store Link) (value Link))
-		(Store (store Link))
+		(Store (store Link) (pointer Link) (value Link))
 	)
 )
 
@@ -128,17 +128,17 @@
 )
 
 (rule 2
-	(elide (Memory.Store previous from _))
+	(elide (Memory.Store previous from value))
 	(if-let (Memory.Store last from _) previous)
-	(Elided.Store last)
+	(Elided.Store last from value)
 )
 
 (rule 1
-	(elide (Memory.Store previous from_1 _))
+	(elide (Memory.Store previous from_1 value))
 	(if-let (Memory.Store last from_2 _) previous)
 	(if-let (Math.Integer from) from_1)
 	(if-let (Math.Integer from) from_2)
-	(Elided.Store last)
+	(Elided.Store last from_1 value)
 )
 
 (rule
