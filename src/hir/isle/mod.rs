@@ -13,6 +13,16 @@ mod internal {
 
 	include!(concat!(env!("OUT_DIR"), "/isle_internal.rs"));
 
+	impl From<Math> for Simple {
+		fn from(value: Math) -> Self {
+			match value {
+				Math::Integer { value } => Self::Integer { value },
+				Math::Add { lhs, rhs } => Self::Add { lhs, rhs },
+				Math::Sub { lhs, rhs } => Self::Sub { lhs, rhs },
+			}
+		}
+	}
+
 	impl Context for Nodes {
 		fn fold_add(&mut self, lhs: u64, rhs: u64) -> u64 {
 			lhs.wrapping_add(rhs)
@@ -43,13 +53,7 @@ mod internal {
 		}
 
 		fn math_to_link(&mut self, node: &Math) -> Link {
-			let node = match *node {
-				Math::Integer { value } => Simple::Integer { value },
-				Math::Add { lhs, rhs } => Simple::Add { lhs, rhs },
-				Math::Sub { lhs, rhs } => Simple::Sub { lhs, rhs },
-			};
-
-			self.add_simple(node).into()
+			self.add_simple(node.clone().into()).into()
 		}
 
 		fn link_to_memory(&mut self, link: Link) -> Option<Memory> {

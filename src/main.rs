@@ -18,7 +18,7 @@ use telepathy::{
 	codegen,
 	hir::{
 		data::{Node, Nodes, Simple},
-		isle::{self, Elided, Math},
+		isle::{self, Elided},
 		parser::{ParseData, Parser},
 	},
 	mir::{data::Program, sequencer::Sequencer},
@@ -75,15 +75,7 @@ fn run_fold_identity(successors: &Successors) -> impl FnMut(&mut Nodes, Id) -> O
 fn run_fold_expressions() -> impl FnMut(&mut Nodes, Id) -> Option<Node> {
 	revise::single(
 		|nodes, id| isle::fold(nodes, id.into()),
-		|_, _, math| {
-			let result = match math {
-				Math::Integer { value } => Simple::Integer { value },
-				Math::Add { lhs, rhs } => Simple::Add { lhs, rhs },
-				Math::Sub { lhs, rhs } => Simple::Sub { lhs, rhs },
-			};
-
-			result.into()
-		},
+		|_, _, math| Simple::from(math).into(),
 	)
 }
 
