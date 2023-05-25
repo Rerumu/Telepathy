@@ -170,8 +170,7 @@ fn run_optimization(
 }
 
 fn process_hir(code: &str, arguments: &Arguments) -> ParseData {
-	let mut parser = Parser::new();
-	let mut data = parser.parse(code.char_indices()).unwrap();
+	let mut data = Parser::new().parse(code.char_indices()).unwrap();
 
 	let roots = data.roots();
 	let mut list = Vec::new();
@@ -180,16 +179,14 @@ fn process_hir(code: &str, arguments: &Arguments) -> ParseData {
 	let mut topological = ReverseTopological::new();
 
 	loop {
-		let mut applied = 0;
-
 		list.clear();
 		list.extend(topological.iter(data.nodes(), roots));
 
 		successors.run(data.nodes(), roots, &mut topological);
 
-		for &id in &list {
-			applied += run_optimization(data.nodes_mut(), id, arguments, &successors, &mut relax);
-		}
+		let applied = list.iter().fold(0, |acc, &id| {
+			acc + run_optimization(data.nodes_mut(), id, arguments, &successors, &mut relax)
+		});
 
 		if applied == 0 {
 			break;
