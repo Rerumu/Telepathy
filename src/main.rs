@@ -24,7 +24,7 @@ use telepathy::{
 	mir::{data::Program, sequencer::Sequencer},
 };
 
-/// A `BrainFxck` optimizing compiler based on the `Regioned` implementation of
+/// A `BrainFuck` optimizing compiler based on the `Regioned` implementation of
 /// a Regionalized Value State Dependence Graph.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(FromArgs)]
